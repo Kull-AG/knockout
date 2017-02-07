@@ -35,7 +35,7 @@
         return allBindings;
     }
 
-    var nativeBindingProviderInstance = new ko.bindingProvider();
+    var nativeBindingProviderInstance = ko.components['bindingProvider'] = new ko.bindingProvider();
 
     function getComponentParamsFromCustomElement(elem, bindingContext) {
         var paramsAttribute = elem.getAttribute('params');
