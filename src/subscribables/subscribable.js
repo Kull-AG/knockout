@@ -1,14 +1,24 @@
 
 ko.subscription = function (target, callback, disposeCallback) {
     this._target = target;
-    this.callback = callback;
-    this.disposeCallback = disposeCallback;
-    this.isDisposed = false;
+    this._callback = callback;
+    this._disposeCallback = disposeCallback;
+    this._isDisposed = false;
+    this._node = null;
+    this._domNodeDisposalCallback = null;
     ko.exportProperty(this, 'dispose', this.dispose);
+    ko.exportProperty(this, 'disposeWhenNodeIsRemoved', this.disposeWhenNodeIsRemoved);
 };
 ko.subscription.prototype.dispose = function () {
-    this.isDisposed = true;
-    this.disposeCallback();
+    if (this._domNodeDisposalCallback) {
+        ko.utils.domNodeDisposal.removeDisposeCallback(this._node, this._domNodeDisposalCallback);
+    }
+    this._isDisposed = true;
+    this._disposeCallback();
+};
+ko.subscription.prototype.disposeWhenNodeIsRemoved = function (node) {
+    this._node = node;
+    ko.utils.domNodeDisposal.addDisposeCallback(node, this._domNodeDisposalCallback = this.dispose.bind(this));
 };
 
 ko.subscribable = function () {
@@ -31,7 +41,7 @@ function limitNotifySubscribers(value, event) {
 
 var ko_subscribable_fn = {
     init: function(instance) {
-        instance._subscriptions = {};
+        instance._subscriptions = { "change": [] };
         instance._versionNumber = 1;
     },
 
@@ -63,13 +73,14 @@ var ko_subscribable_fn = {
             this.updateVersion();
         }
         if (this.hasSubscriptionsForEvent(event)) {
+            var subs = event === defaultEvent && this._changeSubscriptions || this._subscriptions[event].slice(0);
             try {
                 ko.dependencyDetection.begin(); // Begin suppressing dependency detection (by setting the top frame to undefined)
-                for (var a = this._subscriptions[event].slice(0), i = 0, subscription; subscription = a[i]; ++i) {
+                for (var i = 0, subscription; subscription = subs[i]; ++i) {
                     // In case a subscription was disposed during the arrayForEach cycle, check
                     // for isDisposed on each subscription before invoking its callback
-                    if (!subscription.isDisposed)
-                        subscription.callback(valueToNotify);
+                    if (!subscription._isDisposed)
+                        subscription._callback(valueToNotify);
                 }
             } finally {
                 ko.dependencyDetection.end(); // End suppressing dependency detection
@@ -91,7 +102,8 @@ var ko_subscribable_fn = {
 
     limit: function(limitFunction) {
         var self = this, selfIsObservable = ko.isObservable(self),
-            ignoreBeforeChange, previousValue, pendingValue, beforeChange = 'beforeChange';
+            ignoreBeforeChange, notifyNextChange, previousValue, pendingValue, didUpdate,
+            beforeChange = 'beforeChange';
 
         if (!self._origNotifySubscribers) {
             self._origNotifySubscribers = self["notifySubscribers"];
@@ -104,15 +116,22 @@ var ko_subscribable_fn = {
             // If an observable provided a reference to itself, access it to get the latest value.
             // This allows computed observables to delay calculating their value until needed.
             if (selfIsObservable && pendingValue === self) {
-                pendingValue = self();
+                pendingValue = self._evalIfChanged ? self._evalIfChanged() : self();
             }
-            ignoreBeforeChange = false;
-            if (self.isDifferent(previousValue, pendingValue)) {
+            var shouldNotify = notifyNextChange || (didUpdate && self.isDifferent(previousValue, pendingValue));
+
+            didUpdate = notifyNextChange = ignoreBeforeChange = false;
+
+            if (shouldNotify) {
                 self._origNotifySubscribers(previousValue = pendingValue);
             }
         });
 
-        self._limitChange = function(value) {
+        self._limitChange = function(value, isDirty) {
+            if (!isDirty || !self._notificationIsPending) {
+                didUpdate = !isDirty;
+            }
+            self._changeSubscriptions = self._subscriptions[defaultEvent].slice(0);
             self._notificationIsPending = ignoreBeforeChange = true;
             pendingValue = value;
             finish();
@@ -121,6 +140,14 @@ var ko_subscribable_fn = {
             if (!ignoreBeforeChange) {
                 previousValue = value;
                 self._origNotifySubscribers(value, beforeChange);
+            }
+        };
+        self._recordUpdate = function() {
+            didUpdate = true;
+        };
+        self._notifyNextChangeIfValueIsDifferent = function() {
+            if (self.isDifferent(previousValue, self.peek(true /*evaluate*/))) {
+                notifyNextChange = true;
             }
         };
     },
@@ -146,9 +173,14 @@ var ko_subscribable_fn = {
         return !this['equalityComparer'] || !this['equalityComparer'](oldValue, newValue);
     },
 
+    toString: function() {
+      return '[object Object]'
+    },
+
     extend: applyExtenders
 };
 
+ko.exportProperty(ko_subscribable_fn, 'init', ko_subscribable_fn.init);
 ko.exportProperty(ko_subscribable_fn, 'subscribe', ko_subscribable_fn.subscribe);
 ko.exportProperty(ko_subscribable_fn, 'extend', ko_subscribable_fn.extend);
 ko.exportProperty(ko_subscribable_fn, 'getSubscriptionsCount', ko_subscribable_fn.getSubscriptionsCount);
