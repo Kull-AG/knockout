@@ -90,6 +90,16 @@ describe('Binding: With', function() {
         expect(testNode.childNodes[0].childNodes[0]).toContainText("Parent prop value");
     });
 
+    it('Should update descendant bindings when observable viewmodel changes', function() {
+        var vm = ko.observable({ parentItem: "first parent", childItem: "child value" });
+        testNode.innerHTML = "<div data-bind='with: childItem'><span data-bind='text: $parent.parentItem'></span> <span data-bind='text: $data'></span></div>";
+        ko.applyBindings(vm, testNode);
+        expect(testNode.childNodes[0]).toContainText("first parent child value", /* ignoreSpaces */ true);
+
+        vm({parentItem: "second parent", childItem: "child value"});
+        expect(testNode.childNodes[0]).toContainText("second parent child value", /* ignoreSpaces */ true);
+    });
+
     it('Should be able to access all parent binding contexts via $parents, and root context via $root', function() {
         testNode.innerHTML = "<div data-bind='with: topItem'>" +
                                 "<div data-bind='with: middleItem'>" +
@@ -428,6 +438,27 @@ describe('Binding: With', function() {
         expect(testNode).toContainText('');
     });
 
+    it('Should only evaluate a provided function once per update', function () {
+        testNode.innerHTML = "<div data-bind='with: createItem'><span data-bind='text: $data'></span></div>";
+
+        var timesEvaluated = 0;
+        var itemObservable = ko.observable(1);
+        var vm = {
+            createItem: function () {
+                itemObservable();
+                return ++timesEvaluated;
+            }
+        };
+
+        ko.applyBindings(vm, testNode);
+        expect(timesEvaluated).toEqual(1);
+        expect(testNode).toContainText("1");
+
+        itemObservable(2);
+        expect(timesEvaluated).toEqual(2);
+        expect(testNode).toContainText("2");
+    });
+
     describe('With "noChildContext = true" and "as"', function () {
         it('Should not create a child context', function () {
             testNode.innerHTML = "<div data-bind='with: someItem, as: \"item\", noChildContext: true'><span data-bind='text: item.childProp'></span></div>";
@@ -484,6 +515,62 @@ describe('Binding: With', function() {
             // Then it's gone again
             someItem(null);
             expect(testNode.childNodes[0].childNodes.length).toEqual(0);
+        });
+
+        it('Should update descendant bindings when observable viewmodel changes', function() {
+            var vm = ko.observable({ parentItem: "first parent", childItem: "child value" });
+            testNode.innerHTML = "<div data-bind='with: childItem, as: \"item\", noChildContext: true'><span data-bind='text: parentItem'></span> <span data-bind='text: item'></span></div>";
+            ko.applyBindings(vm, testNode);
+            expect(testNode.childNodes[0]).toContainText("first parent child value", /* ignoreSpaces */ true);
+
+            vm({parentItem: "second parent", childItem: "child value"});
+            expect(testNode.childNodes[0]).toContainText("second parent child value", /* ignoreSpaces */ true);
+        });
+
+        it('Should update if given a function', function () {
+            // See knockout/knockout#2285
+            testNode.innerHTML = '<div data-bind="with: getTotal, as: \'item\', noChildContext: true"><div data-bind="text: item"></div>';
+
+            function ViewModel() {
+                var self = this;
+                self.items = ko.observableArray([{ x: ko.observable(4) }])
+                self.getTotal = function() {
+                    var total = 0;
+                    ko.utils.arrayForEach(self.items(), function(item) { total += item.x();});
+                    return total;
+                }
+            }
+
+            var model = new ViewModel();
+            ko.applyBindings(model, testNode);
+            expect(testNode).toContainText("4");
+
+            model.items.push({ x: ko.observable(15) });
+            expect(testNode).toContainText("19");
+
+            model.items()[0].x(10);
+            expect(testNode).toContainText("25");
+        });
+
+        it('Should only evaluate a provided function once per update', function () {
+            testNode.innerHTML = "<div data-bind='with: createItem, as: \"item\", noChildContext: true'><span data-bind='text: item'></span></div>";
+
+            var timesEvaluated = 0;
+            var itemObservable = ko.observable(1);
+            var vm = {
+                createItem: function () {
+                    itemObservable();
+                    return ++timesEvaluated;
+                }
+            };
+
+            ko.applyBindings(vm, testNode);
+            expect(timesEvaluated).toEqual(1);
+            expect(testNode).toContainText("1");
+
+            itemObservable(2);
+            expect(timesEvaluated).toEqual(2);
+            expect(testNode).toContainText("2");
         });
     });
 
@@ -546,6 +633,62 @@ describe('Binding: With', function() {
             // Then it's gone again
             someItem(null);
             expect(testNode.childNodes[0].childNodes.length).toEqual(0);
+        });
+
+        it('Should update descendant bindings when observable viewmodel changes', function() {
+            var vm = ko.observable({ parentItem: "first parent", childItem: "child value" });
+            testNode.innerHTML = "<div data-bind='with: childItem, as: \"item\", noChildContext: false'><span data-bind='text: $parent.parentItem'></span> <span data-bind='text: item'></span></div>";
+            ko.applyBindings(vm, testNode);
+            expect(testNode.childNodes[0]).toContainText("first parent child value", /* ignoreSpaces */ true);
+
+            vm({parentItem: "second parent", childItem: "child value"});
+            expect(testNode.childNodes[0]).toContainText("second parent child value", /* ignoreSpaces */ true);
+        });
+
+        it('Should update if given a function', function () {
+            // See knockout/knockout#2285
+            testNode.innerHTML = '<div data-bind="with: getTotal, as: \'item\', noChildContext: false"><div data-bind="text: item"></div>';
+
+            function ViewModel() {
+                var self = this;
+                self.items = ko.observableArray([{ x: ko.observable(4) }])
+                self.getTotal = function() {
+                    var total = 0;
+                    ko.utils.arrayForEach(self.items(), function(item) { total += item.x();});
+                    return total;
+                }
+            }
+
+            var model = new ViewModel();
+            ko.applyBindings(model, testNode);
+            expect(testNode).toContainText("4");
+
+            model.items.push({ x: ko.observable(15) });
+            expect(testNode).toContainText("19");
+
+            model.items()[0].x(10);
+            expect(testNode).toContainText("25");
+        });
+
+        it('Should only evaluate a provided function once per update', function () {
+            testNode.innerHTML = "<div data-bind='with: createItem, as: \"item\", noChildContext: false'><span data-bind='text: item'></span></div>";
+
+            var timesEvaluated = 0;
+            var itemObservable = ko.observable(1);
+            var vm = {
+                createItem: function () {
+                    itemObservable();
+                    return ++timesEvaluated;
+                }
+            };
+
+            ko.applyBindings(vm, testNode);
+            expect(timesEvaluated).toEqual(1);
+            expect(testNode).toContainText("1");
+
+            itemObservable(2);
+            expect(timesEvaluated).toEqual(2);
+            expect(testNode).toContainText("2");
         });
     });
 });

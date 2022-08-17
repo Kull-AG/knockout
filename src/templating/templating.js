@@ -240,10 +240,13 @@
     };
 
     var templateComputedDomDataKey = ko.utils.domData.nextKey();
-    function disposeOldComputedAndStoreNewOne(element, newComputed) {
+    function disposeOldComputed(element) {
         var oldComputed = ko.utils.domData.get(element, templateComputedDomDataKey);
         if (oldComputed && (typeof(oldComputed.dispose) == 'function'))
             oldComputed.dispose();
+    }
+
+    function storeNewComputed(element, newComputed) {
         ko.utils.domData.set(element, templateComputedDomDataKey, (newComputed && (!newComputed.isActive || newComputed.isActive())) ? newComputed : undefined);
     }
 
@@ -252,7 +255,7 @@
         'init': function(element, valueAccessor) {
             // Support anonymous templates
             var bindingValue = ko.utils.unwrapObservable(valueAccessor());
-            if (typeof bindingValue == "string" || bindingValue['name']) {
+            if (typeof bindingValue == "string" || 'name' in bindingValue) {
                 // It's a named template - clear the element
                 ko.virtualElements.emptyNode(element);
             } else if ('nodes' in bindingValue) {
@@ -291,13 +294,13 @@
                 options = ko.utils.unwrapObservable(value),
                 shouldDisplay = true,
                 templateComputed = null,
-                templateName;
+                template;
 
             if (typeof options == "string") {
-                templateName = value;
+                template = value;
                 options = {};
             } else {
-                templateName = options['name'];
+                template = 'name' in options ? options['name'] : element;
 
                 // Support "if"/"ifnot" conditions
                 if ('if' in options)
@@ -306,10 +309,18 @@
                     shouldDisplay = !ko.utils.unwrapObservable(options['ifnot']);
             }
 
+            // Don't show anything if an empty name is given (see #2446)
+            if (shouldDisplay && !template) {
+                shouldDisplay = false;
+            }
+
+            // Dispose the old computed before displaying data since in some cases, the code below can cause the old computed to update
+            disposeOldComputed(element);
+
             if ('foreach' in options) {
                 // Render once for each data point (treating data set as empty if shouldDisplay==false)
                 var dataArray = (shouldDisplay && options['foreach']) || [];
-                templateComputed = ko.renderTemplateForEach(templateName || element, dataArray, options, element, bindingContext);
+                templateComputed = ko.renderTemplateForEach(template, dataArray, options, element, bindingContext);
             } else if (!shouldDisplay) {
                 ko.virtualElements.emptyNode(element);
             } else {
@@ -322,11 +333,10 @@
                         'exportDependencies': true
                     });
                 }
-                templateComputed = ko.renderTemplate(templateName || element, innerBindingContext, options, element);
+                templateComputed = ko.renderTemplate(template, innerBindingContext, options, element);
             }
 
-            // It only makes sense to have a single template computed per element (otherwise which one should have its output displayed?)
-            disposeOldComputedAndStoreNewOne(element, templateComputed);
+            storeNewComputed(element, templateComputed);
         }
     };
 

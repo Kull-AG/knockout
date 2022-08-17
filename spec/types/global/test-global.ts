@@ -11,7 +11,7 @@ function test_creatingVMs() {
 
     ko.applyBindings(myViewModel);
     ko.applyBindings(myViewModel, document.body, (ctx) => { ctx.x = "test"; });
-    ko.applyBindings(myViewModel, document.getElementById('someElementId'));
+    ko.applyBindings(myViewModel, document.getElementById('someElementId')!);
 
     myViewModel.personName();
     myViewModel.personName('Mary');
@@ -19,6 +19,26 @@ function test_creatingVMs() {
 
     const subscription = myViewModel.personName.subscribe(newValue => {
         alert("The person's new name is " + newValue);
+    });
+
+    // arrayChange event works for any observable
+    myViewModel.personName.extend({ trackArrayChanges: true });
+    myViewModel.personName.subscribe(changes => {
+        console.log(changes[0].value.toUpperCase());
+    }, myViewModel, "arrayChange");
+
+    ko.when<string>(myViewModel.personName, value => {
+        console.log("personName has a value of ", value.toUpperCase());
+    });
+
+    ko.when(() => {
+        return !myViewModel.personName();
+    }).then(x => {
+        if (x === true) {
+            console.log("personName is clear");
+        } else {
+            throw Error("Should never happen");
+        }
     });
 
     subscription.dispose();
@@ -64,9 +84,9 @@ function test_computed() {
         public acceptedNumericValue = ko.observable(123);
         public lastInputWasValid = ko.observable(true);
 
-        public attemptedValue = ko.computed<number>({
+        public attemptedValue = ko.computed<number, this>({
             read: this.acceptedNumericValue,
-            write: function (this: MyViewModel2, value) {
+            write: function (value) {
                 if (isNaN(value))
                     this.lastInputWasValid(false);
                 else {
@@ -105,6 +125,10 @@ function test_observableArrays() {
     ]);
 
     const multiTypeObservableArray = ko.observableArray<string | number | undefined>();
+
+    anotherObservableArray.subscribe(changes => {
+        console.log(changes[0].value.name.toUpperCase());
+    }, null, "arrayChange");
 
     myObservableArray().length;
     myObservableArray()[0];
@@ -284,6 +308,7 @@ function test_more() {
     viewModel.hasALotOfPets = ko.computed(() => viewModel.pets().length > 2);
 
     const plainJs = ko.toJS(viewModel);
+    var petsInitials = plainJs.pets.map(x => x.charAt(0));
 
     ko.extenders.logChange = function (target: ko.Subscribable, option: string) {
         target.subscribe((newValue: string) => {
@@ -357,7 +382,7 @@ function test_more() {
 
         test() {
             const first: string = "test";
-            this.firstName = ko.observable(first).extend({ required: "Please enter a first name", logChange: "first name" });
+            this.firstName = ko.observable(first).extend({ required: "Please enter a first name", logChange: "first name", validate: v => !!v.match(/^.+$/) });
         }
     }
 
@@ -367,6 +392,7 @@ function test_more() {
     const upperCaseName = ko.computed(() => name.toUpperCase()).extend({ throttle: 500 });
 
     class AppViewModel3 {
+        // Observable<string | undefined> since there's no initial value
         public instantaneousValue = ko.observable<string>();
         public throttledValue = ko.computed(this.instantaneousValue)
             .extend({ throttle: 400 });
@@ -375,7 +401,7 @@ function test_more() {
 
         public throttledValueLogger = ko.computed(() => {
             const val = this.instantaneousValue();
-            if (val !== '')
+            if (val && val !== '')
                 this.loggedValues.push(val);
         });
     }
@@ -504,7 +530,7 @@ function test_misc(this: any) {
             ko.computed({
                 read: () => {
                     ko.utils.unwrapObservable(valueAccessor());
-                    ko.bindingHandlers.options.update.apply(this, args);
+                    ko.bindingHandlers.options.update.apply(this, args as any);
                 },
                 owner: this,
                 disposeWhenNodeIsRemoved: element
@@ -525,8 +551,8 @@ function test_misc(this: any) {
     var x = ko.observableArray([1, 2, 3]);
 
     let element = new HTMLElement();
-    ko.utils.domNodeDisposal.addDisposeCallback(element, () => {
-        $(element).datepicker("destroy");
+    ko.utils.domNodeDisposal.addDisposeCallback(element, el => {
+        $(el).datepicker("destroy");
     });
 
     this.observableFactory = function (readonly: boolean = false): ko.Subscribable<number> {
@@ -550,12 +576,12 @@ function test_customObservable() {
         // Set up the attribute observable cache
         model._koObservables || (model._koObservables = {});
 
-        // If we already have a cached observable then just return it		
+        // If we already have a cached observable then just return it
         if (attribute in model._koObservables) {
             return model._koObservables[attribute];
         }
 
-        // Create our observable getter/setter function	
+        // Create our observable getter/setter function
         var observableAttribute = <ko.Observable>(function (this: any): any {
             if (arguments.length > 0) {
                 observableAttribute.valueWillMutate();
@@ -643,7 +669,7 @@ function test_Components() {
         // viewModel from createViewModel factory method
         ko.components.register("name", { template: "string-template", viewModel: { createViewModel: function (params: any, componentInfo: ko.components.ComponentInfo) { return null; } } });
 
-        // viewModel from an AMD module 
+        // viewModel from an AMD module
         ko.components.register("name", { template: "string-template", viewModel: { require: "module" } });
 
         // ------- template overloads
@@ -656,11 +682,15 @@ function test_Components() {
         // template using Node array
         ko.components.register("name", { template: nodeArray, viewModel: viewModelFn });
 
-        // template using an AMD module 
+        // template using an AMD module
         ko.components.register("name", { template: { require: "text!module" }, viewModel: viewModelFn });
 
         // Empty config for registering custom elements that are handled by name convention
         ko.components.register('name', { /* No config needed */ });
+    }
+
+    function test_DefaultLoader() {
+        ko.components.defaultLoader.getConfig("name", (config: ko.components.Config) => { config.synchronous = true; });
     }
 }
 
@@ -668,6 +698,44 @@ function test_Components() {
 function testUnwrapUnion(this: any) {
     let possibleObs: ko.Observable<number> | number = this.getValue();
     const num = ko.unwrap(possibleObs);
+}
+
+
+function testToJS() {
+    const obj: {
+        foo: string
+        bar: string
+    } = ko.toJS({ foo: ko.observable(''), bar: '' })
+
+    const arr: {
+        foo: string
+        bar: string
+    }[] = ko.toJS([{ foo: ko.observable(''), bar: '' }])
+
+    const observableArr: {
+        foo: string
+        bar: string
+    }[] = ko.toJS(ko.observableArray([ ko.observable({ foo: ko.observable(''), bar: '' }) ]))
+
+    const nestedObj: {
+        foo: {
+            bar: string
+        }
+    } = ko.toJS(
+        ko.observable({
+            foo: ko.observable({ bar: '' })
+        })
+    )
+
+    const builtins: {
+        date: Date
+        regexp: RegExp
+        func: (v: string) => string
+    } = ko.toJS({
+        date: new Date(),
+        regexp: /foo/,
+        func: (v: string) => ''
+    })
 }
 
 
@@ -715,7 +783,7 @@ class DummyTemplateEngine extends ko.templateEngine {
             return new DummyTemplateSource(this, template); // Named template comes from the in-memory collection
         }
         else if ((template.nodeType == 1) || (template.nodeType == 8)) {
-            return new ko.templateSources.anonymousTemplate(template); // Anonymous 
+            return new ko.templateSources.anonymousTemplate(template); // Anonymous
         }
         else {
             throw new Error("Unrecognized template source");
@@ -1330,3 +1398,15 @@ testNode.innerHTML = "<div data-bind='template: \"myTemplate\"'></div>";
 ko.applyBindings(null, testNode);
 // Since the actual template markup was invalid, we don't really care what the
 // resulting DOM looks like. We are only verifying there were no exceptions.
+
+function testIgnoreDependencies() {
+    const five = ko.ignoreDependencies(() => 5);
+
+    const target = {foo: "foo"};
+
+    const foobar = ko.ignoreDependencies(function (bar) {
+        return this.foo + bar;
+    }, target, ["bar"])
+
+    foobar.toUpperCase();
+}

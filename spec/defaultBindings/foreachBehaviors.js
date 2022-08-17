@@ -167,7 +167,7 @@ describe('Binding: Foreach', function() {
         expect(testNode.childNodes[0]).toContainHtml('<span data-bind="text: $data">first child</span><span data-bind="text: $data">added child</span>');
         expect(afterAddCallbackData.length).toEqual(1);
         expect(afterAddCallbackData[0].elem).toEqual(testNode.childNodes[0].childNodes[1]);
-        expect(afterAddCallbackData[0].index).toEqual(0);
+        expect(afterAddCallbackData[0].index).toEqual(1);
         expect(afterAddCallbackData[0].value).toEqual("added child");
         expect(afterAddCallbackData[0].currentParentClone).toContainHtml('<span data-bind="text: $data">first child</span><span data-bind="text: $data">added child</span>');
 
@@ -722,6 +722,20 @@ describe('Binding: Foreach', function() {
         planets([ 'H', 'I', 'J', 'K' ]);
         expect(testNode).toContainText('HIJK');
         expect(beforeMoveItems).toEqual([]);
+    });
+
+    it('Should not update a binding that was just initialized', function() {
+        // See https://github.com/knockout/knockout/issues/2439
+        testNode.innerHTML = '<div data-bind="if: items().length"><div data-bind="foreach: items"><div data-bind="text: $data"></div></div></div><div data-bind="foreach: items"><b></b></div>';
+
+        var vm = {
+            items: ko.observableArray([]),
+        };
+        ko.applyBindings(vm, testNode);
+        expect(testNode).toContainText("");
+
+        vm.items(["item"]);
+        expect(testNode).toContainText("item");
     });
 
     if ("activeElement" in document) {

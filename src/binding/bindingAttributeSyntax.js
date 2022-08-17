@@ -41,11 +41,6 @@
                 dataItem = ko.utils.unwrapObservable(dataItemOrObservable);
 
             if (parentContext) {
-                // When a "parent" context is given, register a dependency on the parent context. Thus whenever the
-                // parent context is updated, this context will also be updated.
-                if (parentContext[contextSubscribable])
-                    parentContext[contextSubscribable]();
-
                 // Copy $root and any custom properties from the parent context
                 ko.utils.extend(self, parentContext);
 
@@ -80,6 +75,12 @@
             // function could also add dependencies to this binding context.
             if (extendCallback)
                 extendCallback(self, parentContext, dataItem);
+
+            // When a "parent" context is given and we don't already have a dependency on its context, register a dependency on it.
+            // Thus whenever the parent context is updated, this context will also be updated.
+            if (parentContext && parentContext[contextSubscribable] && !ko.computedContext.computed().hasAncestorDependency(parentContext[contextSubscribable])) {
+                parentContext[contextSubscribable]();
+            }
 
             if (dataDependency) {
                 self[contextDataDependency] = dataDependency;
@@ -153,8 +154,6 @@
     // Similarly to "child" contexts, provide a function here to make sure that the correct values are set
     // when an observable view model is updated.
     ko.bindingContext.prototype['extend'] = function(properties, options) {
-        // If the parent context references an observable view model, "contextSubscribable" will always be the
-        // latest view model object. If not, "contextSubscribable" isn't set, and we can use the static "$data" value.
         return new ko.bindingContext(inheritParentVm, this, null, function(self, parentContext) {
             ko.utils.extend(self, typeof(properties) == "function" ? properties(self) : properties);
         }, options);
@@ -210,10 +209,13 @@
         childrenComplete: "childrenComplete",
         descendantsComplete : "descendantsComplete",
 
-        subscribe: function (node, event, callback, context) {
+        subscribe: function (node, event, callback, context, options) {
             var bindingInfo = ko.utils.domData.getOrSet(node, boundElementDomDataKey, {});
             if (!bindingInfo.eventSubscribable) {
                 bindingInfo.eventSubscribable = new ko.subscribable;
+            }
+            if (options && options['notifyImmediately'] && bindingInfo.notifiedEvents[event]) {
+                ko.dependencyDetection.ignore(callback, context, [node]);
             }
             return bindingInfo.eventSubscribable.subscribe(callback, context, event);
         },
@@ -221,6 +223,7 @@
         notify: function (node, event) {
             var bindingInfo = ko.utils.domData.get(node, boundElementDomDataKey);
             if (bindingInfo) {
+                bindingInfo.notifiedEvents[event] = true;
                 if (bindingInfo.eventSubscribable) {
                     bindingInfo.eventSubscribable['notifySubscribers'](node, event);
                 }
@@ -396,6 +399,9 @@
         if (!alreadyBound) {
             bindingInfo.context = bindingContext;
         }
+        if (!bindingInfo.notifiedEvents) {
+            bindingInfo.notifiedEvents = {};
+        }
 
         // Use bindings if given, otherwise fall back on asking the bindings provider to give us some bindings
         var bindings;
@@ -444,9 +450,9 @@
                 };
 
             // Use of allBindings as a function is maintained for backwards compatibility, but its use is deprecated
-            function allBindings() {
+            var allBindings = function() {
                 return ko.utils.objectMap(bindingsUpdater ? bindingsUpdater() : bindings, evaluateValueAccessor);
-            }
+            };
             // The following is the 3.x allBindings API
             allBindings['get'] = function(key) {
                 return bindings[key] && evaluateValueAccessor(getValueAccessor(key));
@@ -592,6 +598,7 @@
     ko.exportSymbol('bindingHandlers', ko.bindingHandlers);
     ko.exportSymbol('bindingEvent', ko.bindingEvent);
     ko.exportSymbol('bindingEvent.subscribe', ko.bindingEvent.subscribe);
+    ko.exportSymbol('bindingEvent.startPossiblyAsyncContentBinding', ko.bindingEvent.startPossiblyAsyncContentBinding);
     ko.exportSymbol('applyBindings', ko.applyBindings);
     ko.exportSymbol('applyBindingsToDescendants', ko.applyBindingsToDescendants);
     ko.exportSymbol('applyBindingAccessorsToNode', ko.applyBindingAccessorsToNode);
